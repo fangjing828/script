@@ -1,0 +1,182 @@
+#!/bin/bash
+# tomcat7 This shell script takes care of starting and stopping Tomcat
+# chkconfig: 2345 80 20
+# date: 2015-07-30
+#
+### BEGIN INIT INFO
+# Provides: tomcat7
+# Required-Start: $network $syslog
+# Required-Stop: $network $syslog
+# Default-Start:
+# Default-Stop:
+# Description: Release implementation for Servlet 2.5 and JSP 2.1
+# Short-Description: start and stop tomcat
+### END INIT INFO
+ 
+## Source function library.
+. /etc/rc.d/init.d/functions
+
+export JAVA_HOME=/usr/java/jdk1.7.0_51
+export PATH=$JAVA_HOME/bin:$PATH
+TOMCAT_HOME=/opt/app/tomcat
+TOMCAT_LOG_LOCAL=/opt/logs/tomcat
+TOMCAT_WOKE_HOME=/opt/ctrip/web/work
+APP_NAME=repo-spring
+APP_LIB=/opt/app/lib
+SHUTDOWN_WAIT=10
+CHK_CONFIG_LEVEL=6
+
+tomcat_pid() {
+	echo `ps aux | grep org.apache.catalina.startup.Bootstrap | grep -v grep | grep ${TOMCAT_HOME} | awk '{ print $2 }'`
+}
+ 
+start(){
+    chkconfig --level ${CHK_CONFIG_LEVEL} $(basename $0) on;
+    pid=$(tomcat_pid)
+    if [ -n "$pid" ];then
+         echo "Tomcat is already running (pid: $pid)"
+    else
+		# Start tomcat
+		if [ "$#" == "0" ];then
+			echo "Starting tomcat"
+			export JAVA_OPTS="-server -XX:+AggressiveOpts -XX:+DoEscapeAnalysis \
+			-Xmx2500m \
+			-Xms2500m \
+			-Xmn512m \
+			-Xss512K \
+			-XX:PermSize=128M \
+			-XX:MaxPermSize=256M \
+			-XX:SurvivorRatio=8 \
+			-XX:+UseCompressedOops \
+			-XX:+UseParNewGC \
+			-XX:+UseConcMarkSweepGC \
+			-XX:+CMSClassUnloadingEnabled \
+			-XX:+UseCMSCompactAtFullCollection \
+			-XX:CMSFullGCsBeforeCompaction=0 \
+			-XX:+CMSParallelRemarkEnabled \
+			-XX:+DisableExplicitGC \
+			-XX:+UseCMSInitiatingOccupancyOnly \
+			-XX:CMSInitiatingOccupancyFraction=75 \
+			-XX:SoftRefLRUPolicyMSPerMB=0 \
+			"
+			/bin/su -p -s /bin/sh $(whoami) ${TOMCAT_HOME}/bin/startup.sh
+		elif [ "$1" -lt "2500" ];then
+			echo "The JVM memory setting is less than 2500,tomcat startip failed"
+		elif [ "$1" -gt "${JVM_MAX_MEM}" ];then
+			echo "The JVM memory setting is greater than system memory,tomcat startup failed"
+		else
+			echo "Starting tomcat"
+			export JAVA_OPTS="-server -XX:+AggressiveOpts -XX:+DoEscapeAnalysis \
+			-Xmx${1}m \
+			-Xms${1}m \
+			-Xmn512m \
+			-Xss512K \
+			-XX:PermSize=128M \
+			-XX:MaxPermSize=256M \
+			-XX:SurvivorRatio=8 \
+			-XX:+UseCompressedOops \
+			-XX:+UseParNewGC \
+			-XX:+UseConcMarkSweepGC \
+			-XX:+CMSClassUnloadingEnabled \
+			-XX:+UseCMSCompactAtFullCollection \
+			-XX:CMSFullGCsBeforeCompaction=0 \
+			-XX:+CMSParallelRemarkEnabled \
+			-XX:+DisableExplicitGC \
+			-XX:+UseCMSInitiatingOccupancyOnly \
+			-XX:CMSInitiatingOccupancyFraction=75 \
+			-XX:SoftRefLRUPolicyMSPerMB=0 \
+			"
+			/bin/su -p -s /bin/sh $(whoami) ${TOMCAT_HOME}/bin/startup.sh
+		fi
+    fi
+    return 0
+}
+
+stop(){
+    chkconfig --level ${CHK_CONFIG_LEVEL} $(basename $0) off;
+    pid=$(tomcat_pid)
+    if [ -n "$pid" ];then
+		echo "Stoping Tomcat"
+        /bin/su -p -s /bin/sh $(whoami) $TOMCAT_HOME/bin/shutdown.sh
+ 
+        let kwait=$SHUTDOWN_WAIT
+        count=0;
+        until [ `ps -p $pid | grep -c $pid` = '0' ] || [ $count -gt $kwait ]
+        do
+            echo -n -e "\nwaiting for processes to exit";
+            sleep 1
+            let count=$count+1;
+        done
+ 
+        if [ $count -gt $kwait ]; then
+            echo -n -e "\nkilling processes which didn't stop after $SHUTDOWN_WAIT seconds"
+            kill -9 $pid
+        fi
+    else
+        echo "Tomcat is not running"
+    fi
+    return 0
+}
+
+tdump() {
+    pid=$(tomcat_pid)
+    if [ -n "$pid" ];then
+        su -c "$JAVA_HOME/bin/jstack $pid" $(whoami)  >${TOMCAT_LOG_LOCAL}/${DATESTAMP}_thread_dump_$pid.log 2>&1
+        echo "The dump file is generated in the ${TOMCAT_LOG_LOCAL}/${DATESTAMP}_thread_dump_$pid.log ."
+        grep "The -F option can be used" ${TOMCAT_LOG_LOCAL}/${DATESTAMP}_thread_dump_${pid}.log >> /dev/null 2>&1
+        if [ $? -eq 0 ]; then
+			echo "Trigger dump by focre mode!."
+                  ForceFlag="-F"
+			su -c "$JAVA_HOME/bin/jstack -F $pid" $(whoami)  >${TOMCAT_LOG_LOCAL}/${DATESTAMP}_thread_dump_$pid.log
+			echo "The dump file is generated in the ${TOMCAT_LOG_LOCAL}/${DATESTAMP}_thread_dump_${pid}.log ."
+        else
+			echo ""
+        fi
+    else
+		echo  'Tomcat is not running.'
+    fi
+}
+
+case $1 in
+start)
+    start
+    ;;
+stop)
+    stop
+    ;;
+tdump)
+	tdump
+	;;
+restart)
+    stop
+	sleep 3
+    start
+    ;;
+status)
+    chkconfig --list $(basename $0);
+    pid=$(tomcat_pid)
+    if [ -n "$pid" ]
+    then
+        echo "Tomcat is running with pid: $pid"
+    else
+        echo "Tomcat is not running"
+    fi
+    ;;
+publish)
+	if [ "$#" -lt "1" ];then
+		echo "need version"
+	else
+		stop
+		rm -r ${TOMCAT_WOKE_HOME}/${APP_NAME}
+		rm ${TOMCAT_WOKE_HOME}/${APP_NAME}.war
+		cp ${APP_LIB}/${APP_NAME}-$2.war ${TOMCAT_WOKE_HOME}/${APP_NAME}.war
+		start
+	fi
+	;;
+*)
+	echo "Usage: $0 start [jvmsize]"
+	echo "       $0 {stop|status|tdump|restart}"
+	echo "       $0 publish {version}"
+	exit 1
+esac
+exit 0
